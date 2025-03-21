@@ -180,7 +180,7 @@ class WaypointHead(BaseModule):
 
         lidar2img = torch.from_numpy(np.stack(img_metas[0]['lidar2img'])).to(img_feats.device).float()
         lidar2img = lidar2img[:num_views]
-        img2lidars = lidar2img.inverse()
+        img2lidars = lidar2img.cpu().inverse().to(lidar2img.device) #lidar2img.inverse()
         img2lidars = img2lidars.view(num_views, 1, 1, 4, 4).repeat(B, H*W, D, 1, 1).view(B, LEN, D, 4, 4)
 
         coords3d = torch.matmul(img2lidars, coords).squeeze(-1)[..., :3]
