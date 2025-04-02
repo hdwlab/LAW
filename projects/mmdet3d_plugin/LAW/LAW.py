@@ -294,7 +294,7 @@ class LAW(VAD):
         cur_img_feats = self.extract_feat(img=cur_img, img_metas=cur_img_metas)[0]  
 
         bbox_list = [dict() for i in range(len(img_metas))]
-        metric_dict = self.simple_test_pts(
+        metric_dict, preds_ego_future_traj, gt_ego_future_traj = self.simple_test_pts(
             cur_img_feats,
             cur_img_metas,
             gt_bboxes_3d,
@@ -307,8 +307,34 @@ class LAW(VAD):
             gt_attr_labels=gt_attr_labels,
         )
         
-        for result_dict in bbox_list:
+        print("DEBUG: preds_ego_future_traj shape =", preds_ego_future_traj.shape)
+        for result_dict, ego_cmd in zip(bbox_list, ego_fut_cmd):
+            result_dict['ego_fut_cmd'] = ego_cmd.cpu().numpy()
             result_dict['metric_results'] = metric_dict
+
+        # ここで「軌跡」も bbox_list に含める
+        # eg: bbox_list[i]['trajectories']['pred'], etc.
+        # 今回は batch_size=1 前提で書いているので[0]を参照
+        # preds_ego_future_traj.shape = (B, T, 2or3) など
+        # ego_fut_trajs.shape         = (B, T, 2or3) 
+        # ただし simple_test_pts で cumsum() を取り pred_ego_fut_trajs, gt_ego_fut_trajs に格納済み
+        # => metric_dict_planner_stp3 の計算時に use 
+        # => ここで CPU & numpy 変換し、描画しやすくする
+        if preds_ego_future_traj is not None:
+            pred_ego_fut = preds_ego_future_traj.cpu().numpy()  # shape (T, D)
+        else:
+            pred_ego_fut = None
+ 
+        if ego_fut_trajs is not None:
+            gt_ego_fut = ego_fut_trajs[0].cpu().numpy()  # shape (T, D)
+        else:
+            gt_ego_fut = None
+ 
+        for result_dict in bbox_list:
+            result_dict['trajectories'] = {
+                'pred': pred_ego_fut,
+                'gt': gt_ego_fut
+            }
 
         return bbox_list
     
@@ -350,7 +376,7 @@ class LAW(VAD):
             ego_fut_trajs = ego_fut_trajs[0, 0]
             ego_fut_cmd = ego_fut_cmd[0, 0, 0]
             
-            ego_fut_preds = ego_fut_preds.cumsum(dim=-2)
+            #ego_fut_preds = ego_fut_preds.cumsum(dim=-2)
             ego_fut_trajs = ego_fut_trajs.cumsum(dim=-2)
 
             metric_dict_planner_stp3 = self.compute_planner_metric_stp3(
@@ -370,12 +396,13 @@ class LAW(VAD):
             if self.call_count % 500 == 0:
                 self.compute_and_print_metrics_average()
 
-        return metric_dict_planner_stp3
+        #return metric_dict_planner_stp3
+        # preds_ego_future_traj (未cumsum) は上で cumsum済みの ego_fut_preds
+        # これらを呼び出し元 (simple_test) でも参照したいので return する
+        return metric_dict_planner_stp3, ego_fut_preds, ego_fut_trajs
     
     def compute_and_print_metrics_average(self):
         # compute avg
         avg_metrics = {key: sum(m[key] for m in self.metrics_history) / len(self.metrics_history) for key in self.metrics_history[0]}
         # print avg
         print(f"\n Average metrics after {len(self.metrics_history)} calls: {avg_metrics}")
-
-
